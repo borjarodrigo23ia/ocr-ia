@@ -14,15 +14,15 @@ const getGeminiConfigs = () => {
   const configs = [
     {
       apiKey: process.env.GOOGLE_API_KEY,
-      model: process.env.GOOGLE_GEMINI_MODEL || 'gemini-1.5-pro',
+      model: process.env.GOOGLE_GEMINI_MODEL || 'gemini-2.5-flash',
     },
     {
       apiKey: process.env.GOOGLE_API_KEY_2,
-      model: process.env.GOOGLE_GEMINI_MODEL_2 || 'gemini-1.5-pro',
+      model: process.env.GOOGLE_GEMINI_MODEL_2 || 'gemini-2.5-flash',
     },
     {
       apiKey: process.env.GOOGLE_API_KEY_3,
-      model: process.env.GOOGLE_GEMINI_MODEL_3 || 'gemini-1.5-pro',
+      model: process.env.GOOGLE_GEMINI_MODEL_3 || 'gemini-2.5-flash',
     },
   ].filter(cfg => !!cfg.apiKey);
 
@@ -418,8 +418,8 @@ export async function extractInvoiceData(
 
   // Lista de modelos a probar por cada clave, en orden de fiabilidad y cuota
   const modelsToTry = [
+    'gemini-2.5-flash',
     'gemini-1.5-pro',
-    'gemini-1.5-pro-002',
     'gemini-pro'
   ];
 
