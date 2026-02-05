@@ -129,8 +129,8 @@ class DolibarrClient {
         const entities = await this.makeRequest<DolibarrEntity[]>('/multicompany');
 
         // Filter only active and visible entities
-        const activeEntities = entities.filter(entity =>
-          entity.active === '1' && entity.visible === '1'
+        const activeEntities = entities.filter((entity: any) =>
+          (entity as any).active === '1' && (entity as any).visible === '1'
         );
 
         console.log('✅ ENTIDAD - Entidades obtenidas:', {
@@ -145,7 +145,7 @@ class DolibarrClient {
         console.log('🔍 ENTIDAD - Error del endpoint multicompany:', multicompanyError instanceof Error ? multicompanyError.message : 'Error desconocido');
 
         // If multicompany is not available, return a default entity
-        const defaultEntity: DolibarrEntity = {
+        const defaultEntity: any = {
           id: '1',
           label: 'Entidad Principal',
           active: '1',
@@ -183,7 +183,7 @@ class DolibarrClient {
 
         // If multicompany is not available, return default entity for ID '1'
         if (entityId === '1') {
-          const defaultEntity: DolibarrEntity = {
+          const defaultEntity: any = {
             id: '1',
             label: 'Entidad Principal',
             active: '1',
