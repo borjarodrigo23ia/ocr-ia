@@ -19,6 +19,14 @@ build/
 *.swp
 *.swo
 
+# Environment variables - CRITICAL: Never commit these!
+.env
+.env.local
+.env*.local
+**/.env
+**/.env.local
+**/.env*.local
+
 
 # Debug logs
 npm-debug.log*
