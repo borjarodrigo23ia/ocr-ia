@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     console.error('❌ Error en extracción OCR:', error);
 
     // Mapear errores técnicos a mensajes amigables
-    let clientMessage = 'Ha ocurrido un inconveniente al leer el archivo. Por favor, reintente en unos instantes.';
+    let clientMessage = error.message || 'Ha ocurrido un inconveniente al leer el archivo. Por favor, reintente en unos instantes.';
 
     if (error.message?.includes('saturado') || error.message?.includes('muchas solicitudes') || error.message?.includes('503') || error.message?.includes('overloaded')) {
       clientMessage = 'El sistema está un poco ocupado ahora mismo. Por favor, espere 10 segundos y vuelva a intentarlo.';
@@ -64,7 +64,11 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { error: clientMessage },
+      {
+        error: clientMessage,
+        details: error instanceof Error ? error.message : 'Error desconocido',
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      },
       { status: 500 }
     );
   }
