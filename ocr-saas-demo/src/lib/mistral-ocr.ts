@@ -1,14 +1,16 @@
 import { ExtractedInvoiceData } from '@/types';
 
-if (!process.env.MISTRAL_OCR_API_KEY) {
-  throw new Error('MISTRAL_OCR_API_KEY is not set in environment variables');
-}
+const getMistralConfig = () => {
+  const config = {
+    apiKey: process.env.MISTRAL_OCR_API_KEY,
+    baseUrl: process.env.MISTRAL_OCR_BASE_URL || 'https://api.mistral.ai',
+    model: process.env.MISTRAL_OCR_MODEL || 'mistral-ocr-latest',
+  };
 
-// Configuración de Mistral OCR
-const MISTRAL_OCR_CONFIG = {
-  apiKey: process.env.MISTRAL_OCR_API_KEY,
-  baseUrl: process.env.MISTRAL_OCR_BASE_URL || 'https://api.mistral.ai',
-  model: process.env.MISTRAL_OCR_MODEL || 'mistral-ocr-latest',
+  if (!config.apiKey) {
+    console.warn('⚠️ MISTRAL_OCR_API_KEY is not set in environment variables');
+  }
+  return config;
 };
 
 const INVOICE_EXTRACTION_PROMPT = `
@@ -366,25 +368,30 @@ export async function extractInvoiceDataFromOCR(
   const maxRetries = 3;
   const baseDelay = 3000;
 
-  console.log(`🔍 [Mistral-OCR] Starting extraction with model: ${MISTRAL_OCR_CONFIG.model}`);
+  const config = getMistralConfig();
+  if (!config.apiKey) {
+    throw new Error('MISTRAL_OCR_API_KEY no está configurada en las variables de entorno.');
+  }
+
+  console.log(`🔍 [Mistral-OCR] Starting extraction with model: ${config.model}`);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let uploadedFileId: string | null = null;
-    
+
     try {
       console.log(`🔍 [Mistral-OCR] Attempt ${attempt}/${maxRetries}`);
-      
+
       // Paso 1: Subir el archivo a Mistral
       console.log(`🔍 [Mistral-OCR] Uploading file: ${filename}`);
-      
+
       const formData = new FormData();
       formData.append('purpose', 'ocr');
       formData.append('file', new Blob([new Uint8Array(fileBuffer)], { type: mimeType }), filename);
 
-      const uploadResponse = await fetch(`${MISTRAL_OCR_CONFIG.baseUrl}/v1/files`, {
+      const uploadResponse = await fetch(`${config.baseUrl}/v1/files`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${MISTRAL_OCR_CONFIG.apiKey}`,
+          'Authorization': `Bearer ${config.apiKey}`,
         },
         body: formData,
       });
@@ -392,7 +399,7 @@ export async function extractInvoiceDataFromOCR(
       if (!uploadResponse.ok) {
         const errorText = await uploadResponse.text();
         console.error(`❌ [Mistral-OCR] Upload Error ${uploadResponse.status}:`, errorText);
-        
+
         // Manejar errores específicos de rate limiting
         if (uploadResponse.status === 429 || uploadResponse.status === 503) {
           if (attempt < maxRetries) {
@@ -402,7 +409,7 @@ export async function extractInvoiceDataFromOCR(
             continue;
           }
         }
-        
+
         throw new Error(`Mistral Upload API Error ${uploadResponse.status}: ${errorText}`);
       }
 
@@ -412,12 +419,12 @@ export async function extractInvoiceDataFromOCR(
 
       // Paso 2: Obtener signed URL (siguiendo el patrón del SDK)
       console.log(`🔍 [Mistral-OCR] Getting signed URL for file: ${uploadedFileId}`);
-      
-      const signedUrlResponse = await fetch(`${MISTRAL_OCR_CONFIG.baseUrl}/v1/files/${uploadedFileId}/url?expiry=1`, {
+
+      const signedUrlResponse = await fetch(`${config.baseUrl}/v1/files/${uploadedFileId}/url?expiry=1`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
-          'Authorization': `Bearer ${MISTRAL_OCR_CONFIG.apiKey}`,
+          'Authorization': `Bearer ${config.apiKey}`,
         },
       });
 
@@ -432,7 +439,7 @@ export async function extractInvoiceDataFromOCR(
 
       // Paso 3: Procesar OCR usando la signed URL (como en el SDK de Python)
       const ocrPayload = {
-        model: MISTRAL_OCR_CONFIG.model,
+        model: config.model,
         document: {
           type: 'document_url',
           document_url: signedUrlData.url
@@ -442,11 +449,11 @@ export async function extractInvoiceDataFromOCR(
 
       console.log(`🔍 [Mistral-OCR] Running OCR with signed URL...`);
 
-      const ocrResponse = await fetch(`${MISTRAL_OCR_CONFIG.baseUrl}/v1/ocr`, {
+      const ocrResponse = await fetch(`${config.baseUrl}/v1/ocr`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${MISTRAL_OCR_CONFIG.apiKey}`,
+          'Authorization': `Bearer ${config.apiKey}`,
         },
         body: JSON.stringify(ocrPayload),
       });
@@ -464,7 +471,7 @@ export async function extractInvoiceDataFromOCR(
       const replaceImagesInMarkdown = (markdownStr: string, imagesDict: Record<string, string>): string => {
         for (const [imgName, base64Str] of Object.entries(imagesDict)) {
           markdownStr = markdownStr.replace(
-            new RegExp(`!\\[${imgName}\\]\\(${imgName}\\)`, 'g'), 
+            new RegExp(`!\\[${imgName}\\]\\(${imgName}\\)`, 'g'),
             `![${imgName}](${base64Str})`
           );
         }
@@ -505,11 +512,11 @@ export async function extractInvoiceDataFromOCR(
 
       console.log(`🔍 [Mistral-OCR] Processing extracted content with chat model...`);
 
-      const chatResponse = await fetch(`${MISTRAL_OCR_CONFIG.baseUrl}/v1/chat/completions`, {
+      const chatResponse = await fetch(`${config.baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${MISTRAL_OCR_CONFIG.apiKey}`,
+          'Authorization': `Bearer ${config.apiKey}`,
         },
         body: JSON.stringify(extractionPayload),
       });
@@ -535,7 +542,7 @@ export async function extractInvoiceDataFromOCR(
       console.log('🔍 [Mistral-OCR] Buscando descuentos en texto crudo...');
       const negativeValuePattern = /(?:promociones?|descuentos?|dto|envío|rappel|rebaja|promo)[^\d\-]*(-\d+[.,]\d+)\s*€?/gi;
       const negativeMatches = Array.from(text.matchAll(negativeValuePattern));
-      
+
       if (negativeMatches.length > 0) {
         console.log('🔍 [Mistral-OCR] Valores negativos detectados en texto crudo:', negativeMatches.map(m => (m as RegExpMatchArray)[0]));
       }
@@ -558,7 +565,7 @@ export async function extractInvoiceDataFromOCR(
         extractedData.invoice.number = `AUTO-${dateStr}-${randomSuffix}`;
         console.log('🔄 [Mistral-OCR] Número de factura generado automáticamente:', extractedData.invoice.number);
       }
-      
+
       // Asegurar fecha válida
       if (!extractedData.invoice.date || extractedData.invoice.date.trim() === '' || extractedData.invoice.date === 'null') {
         extractedData.invoice.date = new Date().toISOString().split('T')[0];
@@ -572,7 +579,7 @@ export async function extractInvoiceDataFromOCR(
         discountAmount: (product as any).discountAmount || 0,
         totalPrice: product.totalPrice || (product.quantity * product.unitPrice) || 0
       }));
-      
+
       // Asegurar que el supplier tenga country
       if (!extractedData.supplier.country) {
         extractedData.supplier.country = '';
@@ -584,12 +591,12 @@ export async function extractInvoiceDataFromOCR(
     } catch (error: any) {
       const msg = error.message || '';
       console.log(`❌ [Mistral-OCR] Attempt ${attempt} failed:`, msg);
-      
+
       // Si es el último intento, lanzar el error
       if (attempt === maxRetries) {
         throw error;
       }
-      
+
       // Para otros errores, esperar antes del siguiente intento
       const delay = baseDelay * Math.pow(2, attempt - 1);
       console.log(`⏳ [Mistral-OCR] Waiting ${delay}ms before retry...`);
@@ -599,10 +606,10 @@ export async function extractInvoiceDataFromOCR(
       if (uploadedFileId) {
         try {
           console.log(`🧹 [Mistral-OCR] Cleaning up uploaded file: ${uploadedFileId}`);
-          await fetch(`${MISTRAL_OCR_CONFIG.baseUrl}/v1/files/${uploadedFileId}`, {
+          await fetch(`${config.baseUrl}/v1/files/${uploadedFileId}`, {
             method: 'DELETE',
             headers: {
-              'Authorization': `Bearer ${MISTRAL_OCR_CONFIG.apiKey}`,
+              'Authorization': `Bearer ${config.apiKey}`,
             },
           });
           console.log('✅ [Mistral-OCR] File cleanup successful');
@@ -620,23 +627,23 @@ export async function extractInvoiceDataFromOCR(
 function validateExtractedData(data: ExtractedInvoiceData): boolean {
   console.log('🔍 [Mistral-OCR] Validando datos extraídos...');
   console.log('🔍 [Mistral-OCR] Datos recibidos:', JSON.stringify(data, null, 2));
-  
+
   // Lista de nombres de empresas genéricas o de prueba que deben ser rechazadas
   const testCompanyNames = [
     'test', 'prueba', 'demo', 'ejemplo', 'sample', 'acme', 'company', 'empresa',
     'distribuciones fresca vida', 'fresca vida', 'test company', 'demo company',
     'ejemplo empresa', 'prueba empresa', 'company ltd', 'empresa s.l.'
   ];
-  
+
   // Lista de productos genéricos o de prueba
   const testProductNames = [
     'producto de prueba', 'test product', 'demo product', 'ejemplo producto',
     'producto ejemplo', 'sample product', 'producto genérico', 'test item'
   ];
-  
+
   // Lista de códigos de producto genéricos
   const testProductCodes = [
-    'test-001', 'test-1', 'demo-001', 'prueba-001', 'ejemplo-001', 
+    'test-001', 'test-1', 'demo-001', 'prueba-001', 'ejemplo-001',
     'test001', 'demo001', 'sample001'
   ];
 
@@ -648,7 +655,7 @@ function validateExtractedData(data: ExtractedInvoiceData): boolean {
   }
 
   const supplierNameLower = data.supplier.name.toLowerCase();
-  
+
   // Verificar si el nombre del proveedor es genérico
   if (testCompanyNames.some(testName => supplierNameLower.includes(testName))) {
     console.log('❌ [Mistral-OCR] Validación fallida: Nombre de proveedor parece ser de prueba:', data.supplier.name);
@@ -678,7 +685,7 @@ function validateExtractedData(data: ExtractedInvoiceData): boolean {
         quantity: product.quantity,
         unitPrice: product.unitPrice
       });
-      
+
       // Verificar calidad de la descripción
       if (product.description && product.description.length > 10) {
         console.log(`✅ [Mistral-OCR] Descripción detallada para producto ${index + 1}`);
@@ -694,8 +701,8 @@ function validateExtractedData(data: ExtractedInvoiceData): boolean {
       console.log('❌ [Mistral-OCR] Producto sin descripción válida - rechazando extracción');
       console.log('🔍 [Mistral-OCR] Descripción original:', JSON.stringify(product.description));
       return false; // Rechazar la extracción si no hay descripciones válidas
-    } 
-    
+    }
+
     // Verificar que no sea genérica
     const descLower = product.description.toLowerCase();
     const genericTerms = ['producto', 'servicio', 'artículo', 'item', 'según factura'];
@@ -703,17 +710,17 @@ function validateExtractedData(data: ExtractedInvoiceData): boolean {
       console.log('❌ [Mistral-OCR] Descripción genérica detectada - rechazando extracción:', product.description);
       return false;
     }
-    
+
     console.log('✅ [Mistral-OCR] Descripción válida encontrada:', product.description);
 
     const productDescLower = product.description.toLowerCase();
-    
+
     // Verificar si la descripción del producto es genérica
     if (testProductNames.some(testName => productDescLower.includes(testName))) {
       console.log('❌ [Mistral-OCR] Validación fallida: Descripción de producto parece ser de prueba:', product.description);
       return false;
     }
-    
+
     // Verificar que no sea una descripción genérica que genera el sistema
     const genericDescriptions = ['producto', 'servicio', 'artículo', 'item', 'producto según factura', 'servicio según factura'];
     if (genericDescriptions.some(generic => productDescLower === generic || productDescLower.includes('según factura'))) {
@@ -750,18 +757,18 @@ function validateExtractedData(data: ExtractedInvoiceData): boolean {
     if (product.unitPrice === 0) {
       zeroProductCount++;
       console.log('ℹ️ [Mistral-OCR] Producto con precio 0 detectado (puede ser informativo):', product.description);
-      
+
       // Permitir productos con precio 0 si la descripción sugiere que es informativo/descriptivo
-      const isInformational = productDescLower.includes('problema') || 
-                             productDescLower.includes('buscar') ||
-                             productDescLower.includes('revisar') ||
-                             productDescLower.includes('diagnóstico') ||
-                             productDescLower.includes('análisis') ||
-                             productDescLower.includes('consulta') ||
-                             productDescLower.includes('nota') ||
-                             productDescLower.includes('observación') ||
-                             productDescLower.includes('comentario');
-      
+      const isInformational = productDescLower.includes('problema') ||
+        productDescLower.includes('buscar') ||
+        productDescLower.includes('revisar') ||
+        productDescLower.includes('diagnóstico') ||
+        productDescLower.includes('análisis') ||
+        productDescLower.includes('consulta') ||
+        productDescLower.includes('nota') ||
+        productDescLower.includes('observación') ||
+        productDescLower.includes('comentario');
+
       if (!isInformational) {
         console.log('⚠️ [Mistral-OCR] Producto con precio 0 sin justificación informativa');
       }

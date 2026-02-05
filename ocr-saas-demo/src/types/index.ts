@@ -83,6 +83,7 @@ export interface DolibarrEntity {
   country_code?: string;
   visible: string;
   active: string;
+  entity?: string | number;
 }
 
 export interface DolibarrInvoiceLine {

@@ -6,28 +6,31 @@ import { ExtractedInvoiceData } from '@/types';
 // 3. Si todas fallan, lanza un error claro.
 
 if (!process.env.GOOGLE_API_KEY) {
-  throw new Error('GOOGLE_API_KEY is not set in environment variables');
+  console.warn('⚠️ GOOGLE_API_KEY is not set in environment variables. OCR extraction will fail at runtime.');
 }
 
 // Cambia los valores por defecto de modelo en GEMINI_CONFIGS a 'gemini-2.0-flash' para las tres claves.
-const GEMINI_CONFIGS = [
-  {
-    apiKey: process.env.GOOGLE_API_KEY,
-    model: process.env.GOOGLE_GEMINI_MODEL || 'gemini-2.0-flash',
-  },
-  {
-    apiKey: process.env.GOOGLE_API_KEY_2,
-    model: process.env.GOOGLE_GEMINI_MODEL_2 || 'gemini-2.0-flash',
-  },
-  {
-    apiKey: process.env.GOOGLE_API_KEY_3,
-    model: process.env.GOOGLE_GEMINI_MODEL_3 || 'gemini-2.0-flash',
-  },
-].filter(cfg => !!cfg.apiKey);
+const getGeminiConfigs = () => {
+  const configs = [
+    {
+      apiKey: process.env.GOOGLE_API_KEY,
+      model: process.env.GOOGLE_GEMINI_MODEL || 'gemini-2.0-flash',
+    },
+    {
+      apiKey: process.env.GOOGLE_API_KEY_2,
+      model: process.env.GOOGLE_GEMINI_MODEL_2 || 'gemini-2.0-flash',
+    },
+    {
+      apiKey: process.env.GOOGLE_API_KEY_3,
+      model: process.env.GOOGLE_GEMINI_MODEL_3 || 'gemini-2.0-flash',
+    },
+  ].filter(cfg => !!cfg.apiKey);
 
-if (GEMINI_CONFIGS.length === 0) {
-  throw new Error('No Gemini API keys found in environment variables');
-}
+  if (configs.length === 0) {
+    console.warn('⚠️ No Gemini API keys found in environment variables');
+  }
+  return configs;
+};
 
 const getModelInstance = (apiKey: string, model: string) => {
   const genAI = new GoogleGenerativeAI(apiKey.trim());
@@ -366,14 +369,19 @@ export async function extractInvoiceData(
   // Usamos 1.5-flash primero porque suele tener cuotas mucho más altas que 2.0-flash
   const modelsToTry = ['gemini-1.5-flash', 'gemini-2.0-flash'];
 
+  const configs = getGeminiConfigs();
+  if (configs.length === 0) {
+    throw new Error('No se han configurado las claves de API de Gemini. Por favor, añada GOOGLE_API_KEY a sus variables de entorno.');
+  }
+
   // 1. Barajar (shuffle) las configuraciones de API para distribuir la carga entre las 3 llaves
-  const shuffledConfigs = [...GEMINI_CONFIGS].sort(() => Math.random() - 0.5);
+  const shuffledConfigs = [...configs].sort(() => Math.random() - 0.5);
 
   console.log(`🔀 [Gemini] Load balancing: Using ${shuffledConfigs.length} keys in random order`);
 
   for (let configIdx = 0; configIdx < shuffledConfigs.length; configIdx++) {
     const { apiKey } = shuffledConfigs[configIdx];
-    const originalIdx = GEMINI_CONFIGS.findIndex(c => c.apiKey === apiKey) + 1;
+    const originalIdx = configs.findIndex(c => c.apiKey === apiKey) + 1;
 
     for (const modelToUse of modelsToTry) {
       let attempt = 1;
