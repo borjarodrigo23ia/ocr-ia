@@ -33,16 +33,19 @@ const getGeminiConfigs = () => {
 };
 
 const getModelInstance = (apiKey: string, model: string) => {
-  const genAI = new GoogleGenerativeAI(apiKey.trim());
+  // Limpiar la clave de posibles comillas o espacios extras que den problemas en Vercel
+  const cleanedKey = apiKey.trim().replace(/^["']|["']$/g, '');
+  const genAI = new GoogleGenerativeAI(cleanedKey);
+
   return genAI.getGenerativeModel({
-    model,
+    model: model,
     generationConfig: {
       temperature: 0.05,
-      topK: 50,
-      topP: 0.9,
+      topK: 40,
+      topP: 0.95,
       maxOutputTokens: 8192,
     },
-  }, { apiVersion: 'v1' });
+  });
 };
 
 const INVOICE_EXTRACTION_PROMPT = `
@@ -365,9 +368,13 @@ export async function extractInvoiceData(
   const maxRetriesPerModel = 1; // Solo 1 reintento para máxima velocidad de rotación
   const baseDelay = 500;       // 0.5s base delay
 
-  // Lista de modelos a probar por cada clave
-  // Usamos 1.5-flash primero porque suele tener cuotas mucho más altas que 2.0-flash
-  const modelsToTry = ['gemini-1.5-flash', 'gemini-2.0-flash'];
+  // Lista de modelos a probar por cada clave, en orden de fiabilidad y cuota
+  const modelsToTry = [
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b',
+    'gemini-2.0-flash',
+    'gemini-1.5-pro'
+  ];
 
   const configs = getGeminiConfigs();
   if (configs.length === 0) {
@@ -444,7 +451,12 @@ export async function extractInvoiceData(
           // REGLA DE ORO: Si es Error 429 (Too Many Requests), NO reintentar esa llave, pasar a la siguiente inmediatamente
           if (msg.includes('429') || msg.toLowerCase().includes('too many requests') || msg.includes('quota')) {
             console.log(`🚫 [Gemini] Key #${originalIdx} Rate Limited. Jumping to next key...`);
-            break; // Rompe el bucle de modelos de ESTA llave para pasar a la siguiente llave
+            break;
+          }
+
+          // Si el error es de construcción de URL o fetch básico, loguear con más detalle
+          if (msg.includes('fetching') || msg.includes('Network') || msg.includes('invalid')) {
+            console.error(`❌ [Gemini] Protocol error with Key #${originalIdx} / Model ${modelToUse}:`, msg);
           }
 
           // Si es otro error (503), intentar reintento rápido una vez
