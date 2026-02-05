@@ -32,8 +32,56 @@ const getGeminiConfigs = () => {
   return configs;
 };
 
+const callGeminiRestApi = async (apiKey: string, model: string, content: string, mimeType: string): Promise<string> => {
+  const cleanedKey = apiKey.trim().replace(/^["']|["']$/g, '');
+  // Usar v1beta que a veces es más estable para modelos nuevos o si v1 falla
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanedKey}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: content,
+              },
+            },
+            {
+              text: INVOICE_EXTRACTION_PROMPT,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.05,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 8192,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini REST API Error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+
+  if (!data.candidates || data.candidates.length === 0 || !data.candidates[0].content || !data.candidates[0].content.parts || data.candidates[0].content.parts.length === 0) {
+    throw new Error('Gemini REST API: No content in response');
+  }
+
+  return data.candidates[0].content.parts[0].text;
+};
+
 const getModelInstance = (apiKey: string, model: string) => {
-  // Limpiar la clave de posibles comillas o espacios extras que den problemas en Vercel
   const cleanedKey = apiKey.trim().replace(/^["']|["']$/g, '');
   const genAI = new GoogleGenerativeAI(cleanedKey);
 
@@ -398,20 +446,30 @@ export async function extractInvoiceData(
         try {
           console.log(`🔍 [Gemini] Key #${originalIdx} | Model: ${modelToUse} | Attempt ${attempt}/${maxRetriesPerModel}`);
 
-          const modelInstance = getModelInstance(apiKey!, modelToUse);
-          console.log(`📡 [Gemini] Sending payload (${Math.round(content.length / 1024)} KB)...`);
-          const result = await modelInstance.generateContent([
-            {
-              inlineData: {
-                data: content,
-                mimeType,
-              },
-            },
-            { text: INVOICE_EXTRACTION_PROMPT },
-          ]);
+          let text: string;
 
-          const response = await result.response;
-          const text = response.text();
+          try {
+            // Intentar primero con REST API directo (más robusto contra fallos de URL del SDK)
+            console.log(`📡 [Gemini-REST] Sending payload with ${modelToUse}...`);
+            text = await callGeminiRestApi(apiKey!, modelToUse, content, mimeType);
+          } catch (restError: any) {
+            console.warn(`⚠️ [Gemini-REST] Failed, falling back to SDK:`, restError.message.substring(0, 100));
+
+            // Fallback al SDK si REST falla por cualquier motivo
+            const modelInstance = getModelInstance(apiKey!, modelToUse);
+            const result = await modelInstance.generateContent([
+              {
+                inlineData: {
+                  data: content,
+                  mimeType,
+                },
+              },
+              { text: INVOICE_EXTRACTION_PROMPT },
+            ]);
+
+            const response = await result.response;
+            text = response.text();
+          }
 
           const cleanedText = text.replace(/```json\s*|\s*```/g, '').trim();
           const extractedData = JSON.parse(cleanedText) as ExtractedInvoiceData;
